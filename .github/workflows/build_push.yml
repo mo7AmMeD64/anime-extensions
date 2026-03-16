@@ -63,7 +63,7 @@ jobs:
         # If any changes caused by the merge commit, skip this step because versions should already pumped with that merge.
         # But that should be avoided because our own extensions may not be bumped.
       - name: Bump extensions that use a modified lib
-        if: steps.modified-libs.outputs.any_changed == 'true' && github.repository == 'yuzono/anime-extensions'
+        if: steps.modified-libs.outputs.any_changed == 'true' && github.repository == 'mo7AmMeD64/anime-extensions'
         env:
           COMMIT_MESSAGE: ${{ steps.set-env.outputs.LATEST_COMMIT_MESSAGE }}
         run: |
@@ -132,7 +132,7 @@ jobs:
 
       - name: Upload APKs (${{ matrix.chunk.number }})
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        if: github.repository == 'yuzono/anime-extensions'
+        if: github.repository == 'mo7AmMeD64/anime-extensions'
         with:
           name: "individual-apks-${{ matrix.chunk.number }}"
           path: "**/*.apk"
@@ -144,7 +144,7 @@ jobs:
   publish:
     name: Publish extension repo
     needs: [prepare, build]
-    if: github.repository == 'yuzono/anime-extensions'
+    if: github.repository == 'mo7AmMeD64/anime-extensions'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
