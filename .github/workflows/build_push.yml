@@ -58,10 +58,6 @@ jobs:
           files_separator: " "
           safe_output: false
 
-        # This step is going to commit, but this will not trigger another workflow.
-        # If any changes to lib/ caused on master branch, bump the extensions that uses the modified lib.
-        # If any changes caused by the merge commit, skip this step because versions should already pumped with that merge.
-        # But that should be avoided because our own extensions may not be bumped.
       - name: Bump extensions that use a modified lib
         if: steps.modified-libs.outputs.any_changed == 'true' && github.repository == 'mo7AmMeD64/anime-extensions'
         env:
@@ -179,7 +175,7 @@ jobs:
       - name: Checkout repo branch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: yuzono/aniyomi-repo
+          repository: mo7AmMeD64/aniyomi-repo
           token: ${{ secrets.BOT_PAT }}
           ref: repo
           path: repo
@@ -198,5 +194,3 @@ jobs:
         with:
           message: "${{ needs.prepare.outputs.latestCommitMessage }}"
           cwd: "./repo"
-          # committer_name: github-actions[bot]
-          # committer_email: github-actions[bot]@users.noreply.github.com
