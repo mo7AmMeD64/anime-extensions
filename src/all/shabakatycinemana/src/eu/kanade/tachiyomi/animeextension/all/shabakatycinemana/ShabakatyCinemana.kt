@@ -34,8 +34,16 @@ import java.util.Locale
 
 inline fun <reified T> Response.asModel(deserializer: DeserializationStrategy<T>): T = Json.decodeFromString(deserializer, this.body.string())
 
-inline fun <reified T> Response.asModelList(deserializer: DeserializationStrategy<T>): List<T> = Json.parseToJsonElement(this.body.string()).jsonArray.map {
-    Json.decodeFromJsonElement(deserializer, it)
+inline fun <reified T> Response.asModelList(deserializer: DeserializationStrategy<T>): List<T> {
+    val bodyString = this.body.string()
+    if (bodyString.isBlank() || bodyString == "[]") return emptyList()
+    return try {
+        Json.parseToJsonElement(bodyString).jsonArray.map {
+            Json.decodeFromJsonElement(deserializer, it)
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
 }
 
 object SEpisodeDeserializer : DeserializationStrategy<SEpisode> {
@@ -144,7 +152,6 @@ object SAnimeDeserializer : DeserializationStrategy<SAnime> {
         val starsText = "${"★".repeat(stars / 2)}${"☆".repeat(5 - (stars / 2))}"
         val likes = jsonObject["Likes"]?.jsonPrimitive?.content?.parseAs<Int>() ?: 0
         val dislikes = jsonObject["DisLikes"]?.jsonPrimitive?.content?.parseAs<Int>() ?: 0
-//        val ref = jsonObject["imdbUrlRef"]?.jsonPrimitive?.content ?: ""
 
         return SAnime.create().apply {
             url = nb
@@ -192,8 +199,9 @@ class ShabakatyCinemana :
         private const val LATEST_ITEMS_PER_PAGE = 24
 
         private const val PREF_LATEST_KIND_KEY = "preferred_latest_kind"
-        private const val PREF_LATEST_KIND_DEFAULT = "Movies"
+        private const val PREF_LATEST_KIND_DEFAULT = "All"
         private val KINDS_LIST = arrayOf(
+            Pair("All", 0),
             Pair("Movies", 1),
             Pair("Series", 2),
         )
@@ -226,8 +234,8 @@ class ShabakatyCinemana :
 
     override fun latestUpdatesRequest(page: Int): Request {
         val kind = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT)!!
-
-        return GET("$apiBaseUrl/latest$kind/level/0/itemsPerPage/$LATEST_ITEMS_PER_PAGE/page/${page - 1}/", headers)
+        val kindEndpoint = if (kind == "All") "Movies" else kind
+        return GET("$apiBaseUrl/latest$kindEndpoint/level/0/itemsPerPage/$LATEST_ITEMS_PER_PAGE/page/${page - 1}/", headers)
     }
 
     override fun latestUpdatesParse(response: Response): AnimesPage {
@@ -238,8 +246,11 @@ class ShabakatyCinemana :
     override fun popularAnimeRequest(page: Int): Request {
         val kindPref = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT)!!
         val kind = KINDS_LIST.first { it.first == kindPref }.second
-
-        val url = "$apiBaseUrl/video/V/2/itemsPerPage/$POPULAR_ITEMS_PER_PAGE/level/0/videoKind/$kind/sortParam/desc/pageNumber/${page - 1}"
+        val url = if (kind == 0) {
+            "$apiBaseUrl/video/V/2/itemsPerPage/$POPULAR_ITEMS_PER_PAGE/level/0/sortParam/desc/pageNumber/${page - 1}"
+        } else {
+            "$apiBaseUrl/video/V/2/itemsPerPage/$POPULAR_ITEMS_PER_PAGE/level/0/videoKind/$kind/sortParam/desc/pageNumber/${page - 1}"
+        }
         return GET(url, headers)
     }
 
@@ -273,6 +284,7 @@ class ShabakatyCinemana :
         val year = yearFilter.getFormatted()
         val staffTitle = staffTitleFilter.state
         val browseResultSort = browseResultSortFilter.getValue()
+        val trimmedQuery = query.trim()
 
         var url = apiBaseUrl.toHttpUrl()
         if (isBrowsing) {
@@ -295,31 +307,39 @@ class ShabakatyCinemana :
             url = url.newBuilder()
                 .addQueryParameter("level", "0")
                 .addQueryParameter("offset", "${(page - 1) * POPULAR_ITEMS_PER_PAGE}")
-                .addQueryParameter("videoKind", kindNumber)
                 .addQueryParameter("orderby", browseResultSort)
                 .build()
 
+            if (kindNumber != "0") {
+                url = url.newBuilder().addQueryParameter("videoKind", kindNumber).build()
+            }
+
             val resp = client.newCall(GET(url, headers)).execute()
-            // Todo: remove SAnimeWithInfo data class if no longer needed
-            val animeListWithInfo = resp.asModel(SAnimeWithInfoDeserializer)
+            val animeListWithInfo = try {
+                resp.asModel(SAnimeWithInfoDeserializer)
+            } catch (e: Exception) {
+                return AnimesPage(emptyList(), false)
+            }
             return AnimesPage(animeListWithInfo.animes, animeListWithInfo.animes.size == POPULAR_ITEMS_PER_PAGE)
         } else {
-//            star=8&year=1900,2025
             url = url.newBuilder()
                 .addQueryParameter("level", "0")
                 .addPathSegment("AdvancedSearch")
-                .addQueryParameter("type", kindName)
                 .addQueryParameter("page", "${page - 1}")
                 .addQueryParameter("year", year)
                 .build()
+
+            if (kindName != "all") {
+                url = url.newBuilder().addQueryParameter("type", kindName).build()
+            }
 
             if (bothCategory.isNotBlank()) {
                 url = url.newBuilder().addQueryParameter("category_id", bothCategory).build()
             }
 
-            if (query.isNotBlank()) {
+            if (trimmedQuery.isNotBlank()) {
                 url = url.newBuilder()
-                    .addQueryParameter("videoTitle", query)
+                    .addQueryParameter("videoTitle", trimmedQuery)
                     .build()
             }
 
@@ -340,7 +360,11 @@ class ShabakatyCinemana :
     override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList) = throw UnsupportedOperationException("Not used.")
 
     override suspend fun getEpisodeList(anime: SAnime): List<SEpisode> {
-        val episodeList = super.getEpisodeList(anime)
+        val episodeList = try {
+            super.getEpisodeList(anime)
+        } catch (e: Exception) {
+            emptyList()
+        }
 
         if (episodeList.isNotEmpty()) {
             return episodeList.sortedWith(
@@ -362,19 +386,29 @@ class ShabakatyCinemana :
 
     override fun episodeListRequest(anime: SAnime): Request = GET("$apiBaseUrl/videoSeason/id/${anime.url}")
 
-    override fun episodeListParse(response: Response) = response.asModelList(SEpisodeDeserializer)
+    override fun episodeListParse(response: Response): List<SEpisode> {
+        return try {
+            response.asModelList(SEpisodeDeserializer)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
 
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
         val extension = preferences.getString(PREF_SUBTITLE_EXT_KEY, PREF_SUBTITLE_EXT_DEFAULT)!!
         val language = preferences.getString(PREF_SUBTITLE_LANG_KEY, PREF_SUBTITLE_LANG_DEFAULT)!!
-        val subs = this.client.newCall(GET("$apiBaseUrl/translationFiles/id/${episode.url}")).execute()
-            .asModel(SubtitleDeserialize)
-            .sortedWith(
-                compareBy(
-                    { it.lang.split(SUBTITLE_DELIMITER).contains(extension) },
-                    { it.lang.split(SUBTITLE_DELIMITER).contains(language) },
-                ),
-            ).reversed()
+        val subs = try {
+            this.client.newCall(GET("$apiBaseUrl/translationFiles/id/${episode.url}")).execute()
+                .asModel(SubtitleDeserialize)
+                .sortedWith(
+                    compareBy(
+                        { it.lang.split(SUBTITLE_DELIMITER).contains(extension) },
+                        { it.lang.split(SUBTITLE_DELIMITER).contains(language) },
+                    ),
+                ).reversed()
+        } catch (e: Exception) {
+            emptyList()
+        }
 
         return super.getVideoList(episode).map {
             Video(url = it.url, quality = it.quality, videoUrl = it.videoUrl, subtitleTracks = subs)
