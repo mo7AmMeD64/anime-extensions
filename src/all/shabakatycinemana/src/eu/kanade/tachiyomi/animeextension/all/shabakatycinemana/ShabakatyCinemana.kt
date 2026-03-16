@@ -167,7 +167,7 @@ class ShabakatyCinemana :
 
     override val name = "Shabakaty Cinemana"
 
-    override val baseUrl = "https://cinemana.shabakaty.com"
+    override val baseUrl = "https://cinemana.shabakaty.cc"
 
     private val apiBaseUrl = "$baseUrl/api/android"
 
