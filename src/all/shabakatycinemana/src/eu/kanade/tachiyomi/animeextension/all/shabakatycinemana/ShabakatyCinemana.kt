@@ -197,7 +197,6 @@ class ShabakatyCinemana :
         private const val SEARCH_ITEMS_PER_PAGE = 12
         private const val LATEST_ITEMS_PER_PAGE = 24
 
-        // ✅ FIX: فصل GERMAN و RUSSIAN عن ثوابت الـ pagination
         private const val LANG_ID_GERMAN = 12
         private const val LANG_ID_RUSSIAN = 24
 
@@ -237,8 +236,6 @@ class ShabakatyCinemana :
     override fun animeDetailsParse(response: Response) =
         response.asModel(SAnimeDeserializer)
 
-    // ✅ FIX: latestUpdates يجلب الأفلام والمسلسلات معاً عند اختيار "All"
-    // بما أن الـ API لا يدعم endpoint موحد للكل، نجلب الأفلام والمسلسلات في صفحتين متتاليتين
     override fun latestUpdatesRequest(page: Int): Request {
         val kind = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT)!!
         return when (kind) {
@@ -251,7 +248,6 @@ class ShabakatyCinemana :
                 headers,
             )
             else -> {
-                // "All": نتناوب بين الأفلام والمسلسلات - الصفحات الفردية أفلام والزوجية مسلسلات
                 val apiPage = (page - 1) / 2
                 val endpoint = if (page % 2 != 0) "latestMovies" else "latestSeries"
                 GET(
@@ -267,7 +263,6 @@ class ShabakatyCinemana :
         return AnimesPage(animeList, animeList.size == LATEST_ITEMS_PER_PAGE)
     }
 
-    // ✅ FIX: popularAnime يجلب كل شيء عند kind=0 بدون تصفية
     override fun popularAnimeRequest(page: Int): Request {
         val kindPref = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT)!!
         val kind = KINDS_LIST.first { it.first == kindPref }.second
@@ -370,7 +365,6 @@ class ShabakatyCinemana :
                 .addQueryParameter("year", year)
                 .build()
 
-            // ✅ FIX: عدم إضافة type عند "all" حتى يبحث في الأفلام والمسلسلات معاً
             if (kindName != "all") {
                 url = url.newBuilder()
                     .addQueryParameter("type", kindName)
@@ -452,7 +446,6 @@ class ShabakatyCinemana :
                 GET("$apiBaseUrl/translationFiles/id/${episode.url}"),
             ).execute()
                 .asModel(SubtitleDeserializer)
-                // ✅ FIX: ترتيب صحيح - الأفضل تطابقاً يأتي أولاً
                 .sortedWith(
                     compareByDescending<Track> {
                         it.lang.split(SUBTITLE_DELIMITER).contains(preferredLanguage)
@@ -490,8 +483,6 @@ class ShabakatyCinemana :
                 },
         )
     }
-
-    // ── Filters ──────────────────────────────────────────────────────────────
 
     private open class SingleSelectFilter(
         displayName: String,
@@ -607,7 +598,6 @@ class ShabakatyCinemana :
                 Pair("Arabic", 9),
                 Pair("Hindi", 10),
                 Pair("French", 11),
-                // ✅ FIX: إصلاح IDs الخاطئة لـ German وRussian
                 Pair("German", LANG_ID_GERMAN),
                 Pair("Italian", 13),
                 Pair("Spanish", 14),
@@ -681,8 +671,6 @@ class ShabakatyCinemana :
             ),
         ),
     )
-
-    // ── Preferences ──────────────────────────────────────────────────────────
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         ListPreference(screen.context).apply {
