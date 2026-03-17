@@ -386,12 +386,10 @@ class ShabakatyCinemana :
 
     override fun episodeListRequest(anime: SAnime): Request = GET("$apiBaseUrl/videoSeason/id/${anime.url}")
 
-    override fun episodeListParse(response: Response): List<SEpisode> {
-        return try {
-            response.asModelList(SEpisodeDeserializer)
-        } catch (e: Exception) {
-            emptyList()
-        }
+    override fun episodeListParse(response: Response): List<SEpisode> = try {
+        response.asModelList(SEpisodeDeserializer)
+    } catch (e: Exception) {
+        emptyList()
     }
 
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
