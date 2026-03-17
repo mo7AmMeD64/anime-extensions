@@ -32,8 +32,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
-inline fun <reified T> Response.asModel(deserializer: DeserializationStrategy<T>): T =
-    Json.decodeFromString(deserializer, this.body.string())
+inline fun <reified T> Response.asModel(deserializer: DeserializationStrategy<T>): T = Json.decodeFromString(deserializer, this.body.string())
 
 inline fun <reified T> Response.asModelList(deserializer: DeserializationStrategy<T>): List<T> {
     val bodyString = this.body.string()
@@ -230,11 +229,9 @@ class ShabakatyCinemana :
 
     override fun getAnimeUrl(anime: SAnime) = "$baseUrl/video/en/${anime.url}"
 
-    override fun animeDetailsRequest(anime: SAnime) =
-        GET("$apiBaseUrl/allVideoInfo/id/${anime.url}")
+    override fun animeDetailsRequest(anime: SAnime) = GET("$apiBaseUrl/allVideoInfo/id/${anime.url}")
 
-    override fun animeDetailsParse(response: Response) =
-        response.asModel(SAnimeDeserializer)
+    override fun animeDetailsParse(response: Response) = response.asModel(SAnimeDeserializer)
 
     override fun latestUpdatesRequest(page: Int): Request {
         val kind = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT)!!
@@ -395,11 +392,9 @@ class ShabakatyCinemana :
         }
     }
 
-    override fun searchAnimeParse(response: Response) =
-        throw UnsupportedOperationException("Not used.")
+    override fun searchAnimeParse(response: Response) = throw UnsupportedOperationException("Not used.")
 
-    override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList) =
-        throw UnsupportedOperationException("Not used.")
+    override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList) = throw UnsupportedOperationException("Not used.")
 
     override suspend fun getEpisodeList(anime: SAnime): List<SEpisode> {
         val episodeList = try {
@@ -426,8 +421,7 @@ class ShabakatyCinemana :
         }
     }
 
-    override fun episodeListRequest(anime: SAnime): Request =
-        GET("$apiBaseUrl/videoSeason/id/${anime.url}")
+    override fun episodeListRequest(anime: SAnime): Request = GET("$apiBaseUrl/videoSeason/id/${anime.url}")
 
     override fun episodeListParse(response: Response): List<SEpisode> = try {
         response.asModelList(SEpisodeDeserializer)
@@ -467,11 +461,9 @@ class ShabakatyCinemana :
         }
     }
 
-    override fun videoListRequest(episode: SEpisode) =
-        GET("$apiBaseUrl/transcoddedFiles/id/${episode.url}")
+    override fun videoListRequest(episode: SEpisode) = GET("$apiBaseUrl/transcoddedFiles/id/${episode.url}")
 
-    override fun videoListParse(response: Response) =
-        response.asModelList(VideoDeserializer)
+    override fun videoListParse(response: Response) = response.asModelList(VideoDeserializer)
 
     override fun List<Video>.sort(): List<Video> {
         val quality = preferences.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT)!!
