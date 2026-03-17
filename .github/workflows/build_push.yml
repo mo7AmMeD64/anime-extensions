@@ -176,7 +176,7 @@ jobs:
 
     continue-on-error: true
 
-    if: ${{ toJson(fromJson(needs.prepare.outputs.matrix).chunk) != '[]' && matrix.chunk.number == 17 }}
+    if: ${{ toJson(fromJson(needs.prepare.outputs.matrix).chunk) != '[]' }}
 
     strategy:
 
