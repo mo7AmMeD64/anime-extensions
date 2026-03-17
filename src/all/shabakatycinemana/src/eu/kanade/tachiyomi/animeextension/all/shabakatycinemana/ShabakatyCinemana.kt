@@ -25,6 +25,7 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
@@ -276,149 +277,121 @@ class ShabakatyCinemana :
         return AnimesPage(animeList, animeList.size == POPULAR_ITEMS_PER_PAGE)
     }
 
-    override suspend fun getSearchAnime(
-    page: Int,
-    query: String,
-    filters: AnimeFilterList,
-): AnimesPage {
-    val filterList = if (filters.isEmpty()) getFilterList() else filters
-    val isBrowsingFilter =
-        filterList.find { it.name == IS_BROWSING_FILTER_NAME } as CheckBoxFilter
-    val kindFilter =
-        filterList.find { it.name == KIND_FILTER_NAME } as SingleSelectFilter
-    val mainCategoryFilter =
-        filterList.find { it.name == MAIN_CATEGORY_FILTER_NAME } as MultipleSelectFilter
-    val subCategoryFilter =
-        filterList.find { it.name == SUB_CATEGORY_FILTER_NAME } as MultipleSelectFilter
-    val languageFilter =
-        filterList.find { it.name == LANGUAGE_FILTER_NAME } as SingleSelectFilter
-    val yearFilter =
-        filterList.find { it.name == YEAR_FILTER_NAME } as YearFilter
-    val staffTitleFilter =
-        filterList.find { it.name == STAFF_TITLE_FILTER_NAME } as StaffTitleFilter
-    val browseResultSortFilter =
-        filterList.find { it.name == BROWSE_RESULT_SORT_FILTER_NAME } as BrowseResultSort
-
-    val isBrowsing = isBrowsingFilter.state
-    val kindName = kindFilter.getNameValue()
-    val kindNumber = kindFilter.getNumberValue().toString()
-    val selectedMainCategories = mainCategoryFilter.getSelectedIds()
-    val mainCategory = selectedMainCategories.joinToString(",")
-    val selectedSubCategories = subCategoryFilter.getSelectedIds()
-    val bothCategory = (selectedMainCategories + selectedSubCategories).joinToString(",")
-    val language = languageFilter.getNumberValue().toString()
-    val year = yearFilter.getFormatted()
-    val staffTitle = staffTitleFilter.state
-    val browseResultSort = browseResultSortFilter.getValue()
-    val trimmedQuery = query.trim()
-
-    var url = apiBaseUrl.toHttpUrl()
-
-    if (isBrowsing) {
-        if (languageFilter.state != 0 && mainCategory.isNotBlank()) {
-            url = url.newBuilder()
-                .addPathSegment("videosByCategoryAndLanguage")
-                .addQueryParameter("language_id", language)
-                .addQueryParameter("category_id", mainCategory)
-                .build()
-        } else {
-            url = url.newBuilder()
-                .addPathSegment("videosByCategory")
-                .build()
-            if (mainCategoryFilter.hasSelected()) {
-                url = url.newBuilder()
-                    .addQueryParameter("categoryID", mainCategory)
-                    .build()
-            }
-        }
-
-        url = url.newBuilder()
-            .addQueryParameter("level", "0")
-            .addQueryParameter("offset", "${(page - 1) * POPULAR_ITEMS_PER_PAGE}")
-            .addQueryParameter("orderby", browseResultSort)
-            .build()
-
-        if (kindNumber != "0") {
-            url = url.newBuilder()
-                .addQueryParameter("videoKind", kindNumber)
-                .build()
-        }
-
-        val resp = client.newCall(GET(url, headers)).execute()
-        val animeListWithInfo = try {
-            resp.asModel(SAnimeWithInfoDeserializer)
-        } catch (e: Exception) {
-            return AnimesPage(emptyList(), false)
-        }
-        return AnimesPage(
-            animeListWithInfo.animes,
-            animeListWithInfo.animes.size == POPULAR_ITEMS_PER_PAGE,
-        )
-    } else {
-        // ✅ FIX: عند "all" نرسل طلبين ونجمع النتائج
-        if (kindName == "all") {
-            fun buildUrl(type: String): okhttp3.HttpUrl {
-                var u = apiBaseUrl.toHttpUrl().newBuilder()
-                    .addPathSegment("AdvancedSearch")
-                    .addQueryParameter("level", "0")
-                    .addQueryParameter("page", "${page - 1}")
-                    .addQueryParameter("year", year)
-                    .addQueryParameter("type", type)
-                    .build()
-                if (bothCategory.isNotBlank()) {
-                    u = u.newBuilder().addQueryParameter("category_id", bothCategory).build()
-                }
-                if (trimmedQuery.isNotBlank()) {
-                    u = u.newBuilder().addQueryParameter("videoTitle", trimmedQuery).build()
-                }
-                if (staffTitle.isNotBlank()) {
-                    u = u.newBuilder().addQueryParameter("staffTitle", staffTitle).build()
-                }
-                return u
-            }
-
-            val moviesResp = client.newCall(GET(buildUrl("movies"), headers)).execute()
-            val seriesResp = client.newCall(GET(buildUrl("series"), headers)).execute()
-            val movies = moviesResp.asModelList(SAnimeDeserializer)
-            val series = seriesResp.asModelList(SAnimeDeserializer)
-            val combined = (movies + series)
-            val hasMore = movies.size == SEARCH_ITEMS_PER_PAGE || series.size == SEARCH_ITEMS_PER_PAGE
-            return AnimesPage(combined, hasMore)
-        }
-
-        url = url.newBuilder()
+    private fun buildAdvancedSearchUrl(
+        page: Int,
+        type: String,
+        year: String,
+        bothCategory: String,
+        trimmedQuery: String,
+        staffTitle: String,
+    ): HttpUrl {
+        var url = apiBaseUrl.toHttpUrl().newBuilder()
             .addPathSegment("AdvancedSearch")
             .addQueryParameter("level", "0")
             .addQueryParameter("page", "${page - 1}")
             .addQueryParameter("year", year)
-            .addQueryParameter("type", kindName)
+            .addQueryParameter("type", type)
             .build()
-
         if (bothCategory.isNotBlank()) {
-            url = url.newBuilder()
-                .addQueryParameter("category_id", bothCategory)
-                .build()
+            url = url.newBuilder().addQueryParameter("category_id", bothCategory).build()
         }
-
         if (trimmedQuery.isNotBlank()) {
-            url = url.newBuilder()
-                .addQueryParameter("videoTitle", trimmedQuery)
-                .build()
+            url = url.newBuilder().addQueryParameter("videoTitle", trimmedQuery).build()
         }
-
         if (staffTitle.isNotBlank()) {
-            url = url.newBuilder()
-                .addQueryParameter("staffTitle", staffTitle)
-                .build()
+            url = url.newBuilder().addQueryParameter("staffTitle", staffTitle).build()
         }
-
-        val resp = client.newCall(GET(url, headers)).execute()
-        val animeList = resp.asModelList(SAnimeDeserializer)
-        return AnimesPage(animeList, animeList.size == SEARCH_ITEMS_PER_PAGE)
+        return url
     }
-}
-            
-            
+
+    override suspend fun getSearchAnime(
+        page: Int,
+        query: String,
+        filters: AnimeFilterList,
+    ): AnimesPage {
+        val filterList = if (filters.isEmpty()) getFilterList() else filters
+        val isBrowsingFilter = filterList.find { it.name == IS_BROWSING_FILTER_NAME } as CheckBoxFilter
+        val kindFilter = filterList.find { it.name == KIND_FILTER_NAME } as SingleSelectFilter
+        val mainCategoryFilter = filterList.find { it.name == MAIN_CATEGORY_FILTER_NAME } as MultipleSelectFilter
+        val subCategoryFilter = filterList.find { it.name == SUB_CATEGORY_FILTER_NAME } as MultipleSelectFilter
+        val languageFilter = filterList.find { it.name == LANGUAGE_FILTER_NAME } as SingleSelectFilter
+        val yearFilter = filterList.find { it.name == YEAR_FILTER_NAME } as YearFilter
+        val staffTitleFilter = filterList.find { it.name == STAFF_TITLE_FILTER_NAME } as StaffTitleFilter
+        val browseResultSortFilter = filterList.find { it.name == BROWSE_RESULT_SORT_FILTER_NAME } as BrowseResultSort
+
+        val isBrowsing = isBrowsingFilter.state
+        val kindName = kindFilter.getNameValue()
+        val kindNumber = kindFilter.getNumberValue().toString()
+        val selectedMainCategories = mainCategoryFilter.getSelectedIds()
+        val mainCategory = selectedMainCategories.joinToString(",")
+        val selectedSubCategories = subCategoryFilter.getSelectedIds()
+        val bothCategory = (selectedMainCategories + selectedSubCategories).joinToString(",")
+        val language = languageFilter.getNumberValue().toString()
+        val year = yearFilter.getFormatted()
+        val staffTitle = staffTitleFilter.state
+        val browseResultSort = browseResultSortFilter.getValue()
+        val trimmedQuery = query.trim()
+
+        var url = apiBaseUrl.toHttpUrl()
+
+        if (isBrowsing) {
+            if (languageFilter.state != 0 && mainCategory.isNotBlank()) {
+                url = url.newBuilder()
+                    .addPathSegment("videosByCategoryAndLanguage")
+                    .addQueryParameter("language_id", language)
+                    .addQueryParameter("category_id", mainCategory)
+                    .build()
+            } else {
+                url = url.newBuilder()
+                    .addPathSegment("videosByCategory")
+                    .build()
+                if (mainCategoryFilter.hasSelected()) {
+                    url = url.newBuilder()
+                        .addQueryParameter("categoryID", mainCategory)
+                        .build()
+                }
+            }
+
+            url = url.newBuilder()
+                .addQueryParameter("level", "0")
+                .addQueryParameter("offset", "${(page - 1) * POPULAR_ITEMS_PER_PAGE}")
+                .addQueryParameter("orderby", browseResultSort)
+                .build()
+
+            if (kindNumber != "0") {
+                url = url.newBuilder()
+                    .addQueryParameter("videoKind", kindNumber)
+                    .build()
+            }
+
+            val resp = client.newCall(GET(url, headers)).execute()
+            val animeListWithInfo = try {
+                resp.asModel(SAnimeWithInfoDeserializer)
+            } catch (e: Exception) {
+                return AnimesPage(emptyList(), false)
+            }
+            return AnimesPage(
+                animeListWithInfo.animes,
+                animeListWithInfo.animes.size == POPULAR_ITEMS_PER_PAGE,
+            )
+        } else {
+            if (kindName == "all") {
+                val movies = client.newCall(
+                    GET(buildAdvancedSearchUrl(page, "movies", year, bothCategory, trimmedQuery, staffTitle), headers),
+                ).execute().asModelList(SAnimeDeserializer)
+                val series = client.newCall(
+                    GET(buildAdvancedSearchUrl(page, "series", year, bothCategory, trimmedQuery, staffTitle), headers),
+                ).execute().asModelList(SAnimeDeserializer)
+                val combined = movies + series
+                val hasMore = movies.size == SEARCH_ITEMS_PER_PAGE || series.size == SEARCH_ITEMS_PER_PAGE
+                return AnimesPage(combined, hasMore)
+            }
+
+            val searchUrl = buildAdvancedSearchUrl(page, kindName, year, bothCategory, trimmedQuery, staffTitle)
+            val animeList = client.newCall(GET(searchUrl, headers)).execute().asModelList(SAnimeDeserializer)
+            return AnimesPage(animeList, animeList.size == SEARCH_ITEMS_PER_PAGE)
+        }
+    }
 
     override fun searchAnimeParse(response: Response) = throw UnsupportedOperationException("Not used.")
 
