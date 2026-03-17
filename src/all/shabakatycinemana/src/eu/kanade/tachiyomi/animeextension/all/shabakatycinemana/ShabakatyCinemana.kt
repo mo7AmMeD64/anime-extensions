@@ -32,7 +32,8 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
-inline fun <reified T> Response.asModel(deserializer: DeserializationStrategy<T>): T = Json.decodeFromString(deserializer, this.body.string())
+inline fun <reified T> Response.asModel(deserializer: DeserializationStrategy<T>): T =
+    Json.decodeFromString(deserializer, this.body.string())
 
 inline fun <reified T> Response.asModelList(deserializer: DeserializationStrategy<T>): List<T> {
     val bodyString = this.body.string()
@@ -54,21 +55,18 @@ object SEpisodeDeserializer : DeserializationStrategy<SEpisode> {
         val jsonDecoder = decoder as JsonDecoder
         val jsonObject = jsonDecoder.decodeJsonElement() as JsonObject
 
-        val nb = jsonObject["nb"]?.jsonPrimitive?.content ?: ""
+        val nb = jsonObject["nb"]?.jsonPrimitive?.content!!
         val episodeNumber = jsonObject["episodeNummer"]?.jsonPrimitive?.content
         val seasonNumber = jsonObject["season"]?.jsonPrimitive?.content
-        val seasonEpisode = arrayOf(seasonNumber, episodeNumber).joinToString(ShabakatyCinemana.SEASON_EPISODE_DELIMITER)
+        val seasonEpisode = arrayOf(seasonNumber, episodeNumber)
+            .joinToString(ShabakatyCinemana.SEASON_EPISODE_DELIMITER)
         val uploadDate = jsonObject["videoUploadDate"]?.jsonPrimitive?.content.runCatching {
-            this?.let {
-                synchronized(ShabakatyCinemana.DATE_FORMATTER) {
-                    ShabakatyCinemana.DATE_FORMATTER.parse(it)?.time
-                }
-            }
+            this?.let { ShabakatyCinemana.DATE_FORMATTER.parse(it)?.time }
         }.getOrNull() ?: 0L
 
         return SEpisode.create().apply {
             url = nb
-            episode_number = "$seasonNumber.$episodeNumber".toFloatOrNull() ?: 0f
+            episode_number = "$seasonNumber.$episodeNumber".parseAs()
             name = seasonEpisode
             date_upload = uploadDate
         }
@@ -83,14 +81,14 @@ object VideoDeserializer : DeserializationStrategy<Video> {
         val jsonDecoder = decoder as JsonDecoder
         val jsonObject = jsonDecoder.decodeJsonElement() as JsonObject
 
-        val videoUrl = jsonObject["videoUrl"]?.jsonPrimitive?.content ?: ""
+        val videoUrl = jsonObject["videoUrl"]?.jsonPrimitive?.content!!
         val quality = jsonObject["resolution"]?.jsonPrimitive?.content.orEmpty()
 
         return Video(url = videoUrl, videoUrl = videoUrl, quality = quality)
     }
 }
 
-object SubtitleDeserialize : DeserializationStrategy<List<Track>> {
+object SubtitleDeserializer : DeserializationStrategy<List<Track>> {
     override val descriptor: SerialDescriptor
         get() = buildClassSerialDescriptor("Track")
 
@@ -98,12 +96,12 @@ object SubtitleDeserialize : DeserializationStrategy<List<Track>> {
         val jsonDecoder = decoder as JsonDecoder
         val jsonObject = jsonDecoder.decodeJsonElement() as JsonObject
 
-        return jsonObject["translations"]?.jsonArray?.mapNotNull {
-            val url = it.jsonObject["file"]?.jsonPrimitive?.content ?: return@mapNotNull null
-            val name = it.jsonObject["name"]?.jsonPrimitive?.content ?: ""
-            val extension = it.jsonObject["extention"]?.jsonPrimitive?.content ?: ""
-            val lang = arrayOf(name, extension).filter { it.isNotBlank() }.joinToString(ShabakatyCinemana.SUBTITLE_DELIMITER)
-
+        return jsonObject["translations"]?.jsonArray?.map {
+            val url = it.jsonObject["file"]?.jsonPrimitive?.content!!
+            val name = it.jsonObject["name"]?.jsonPrimitive?.content
+            val extension = it.jsonObject["extention"]?.jsonPrimitive?.content
+            val lang = arrayOf(name, extension)
+                .joinToString(ShabakatyCinemana.SUBTITLE_DELIMITER)
             Track(url, lang)
         }.orEmpty()
     }
@@ -136,13 +134,14 @@ object SAnimeDeserializer : DeserializationStrategy<SAnime> {
         val jsonDecoder = decoder as JsonDecoder
         val jsonObject = jsonDecoder.decodeJsonElement() as JsonObject
 
-        val nb = jsonObject["nb"]?.jsonPrimitive?.content ?: ""
+        val nb = jsonObject["nb"]?.jsonPrimitive?.content!!
         val enTitle = jsonObject["en_title"]?.jsonPrimitive?.content ?: "no title"
         val imgObjUrl = jsonObject["imgObjUrl"]?.jsonPrimitive?.content
         val categories = jsonObject["categories"]?.jsonArray?.mapNotNull {
             it.jsonObject["en_title"]?.jsonPrimitive?.content
         }.orEmpty()
-        val language = jsonObject["videoLanguages"]?.jsonObject?.get("en_title")?.jsonPrimitive?.content
+        val language = jsonObject["videoLanguages"]?.jsonObject
+            ?.get("en_title")?.jsonPrimitive?.content
         val genreText = (categories + listOfNotNull(language)).joinToString()
         val directors = jsonObject["directorsInfo"]?.jsonArray?.mapNotNull {
             it.jsonObject["name"]?.jsonPrimitive?.content
@@ -152,10 +151,10 @@ object SAnimeDeserializer : DeserializationStrategy<SAnime> {
         }?.joinToString()
         val enContent = jsonObject["en_content"]?.jsonPrimitive?.content
         val year = jsonObject["year"]?.jsonPrimitive?.content ?: "N/A"
-        val stars = jsonObject["stars"]?.jsonPrimitive?.content?.toFloatOrNull()?.toInt() ?: 0
+        val stars = jsonObject["stars"]?.jsonPrimitive?.content?.parseAs<Float>()?.toInt() ?: 0
         val starsText = "${"★".repeat(stars / 2)}${"☆".repeat(5 - (stars / 2))}"
-        val likes = jsonObject["Likes"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-        val dislikes = jsonObject["DisLikes"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+        val likes = jsonObject["Likes"]?.jsonPrimitive?.content?.parseAs<Int>() ?: 0
+        val dislikes = jsonObject["DisLikes"]?.jsonPrimitive?.content?.parseAs<Int>() ?: 0
 
         return SAnime.create().apply {
             url = nb
@@ -177,13 +176,9 @@ class ShabakatyCinemana :
     ConfigurableAnimeSource {
 
     override val name = "Shabakaty Cinemana"
-
     override val baseUrl = "https://cinemana.shabakaty.cc"
-
     private val apiBaseUrl = "$baseUrl/api/android"
-
     override val lang = "all"
-
     override val supportsLatest = true
 
     private val preferences by getPreferencesLazy()
@@ -201,6 +196,10 @@ class ShabakatyCinemana :
         private const val POPULAR_ITEMS_PER_PAGE = 30
         private const val SEARCH_ITEMS_PER_PAGE = 12
         private const val LATEST_ITEMS_PER_PAGE = 24
+
+        // ✅ FIX: فصل GERMAN و RUSSIAN عن ثوابت الـ pagination
+        private const val LANG_ID_GERMAN = 12
+        private const val LANG_ID_RUSSIAN = 24
 
         private const val PREF_LATEST_KIND_KEY = "preferred_latest_kind"
         private const val PREF_LATEST_KIND_DEFAULT = "All"
@@ -225,19 +224,42 @@ class ShabakatyCinemana :
         const val SUBTITLE_DELIMITER = " - "
         const val SEASON_EPISODE_DELIMITER = " - "
 
-        val DATE_FORMATTER = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ENGLISH)
+        val DATE_FORMATTER by lazy {
+            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ENGLISH)
+        }
     }
 
     override fun getAnimeUrl(anime: SAnime) = "$baseUrl/video/en/${anime.url}"
 
-    override fun animeDetailsRequest(anime: SAnime) = GET("$apiBaseUrl/allVideoInfo/id/${anime.url}")
+    override fun animeDetailsRequest(anime: SAnime) =
+        GET("$apiBaseUrl/allVideoInfo/id/${anime.url}")
 
-    override fun animeDetailsParse(response: Response) = response.asModel(SAnimeDeserializer)
+    override fun animeDetailsParse(response: Response) =
+        response.asModel(SAnimeDeserializer)
 
+    // ✅ FIX: latestUpdates يجلب الأفلام والمسلسلات معاً عند اختيار "All"
+    // بما أن الـ API لا يدعم endpoint موحد للكل، نجلب الأفلام والمسلسلات في صفحتين متتاليتين
     override fun latestUpdatesRequest(page: Int): Request {
-        val kind = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT) ?: PREF_LATEST_KIND_DEFAULT
-        val kindEndpoint = if (kind == "All") "Movies" else kind
-        return GET("$apiBaseUrl/latest$kindEndpoint/level/0/itemsPerPage/$LATEST_ITEMS_PER_PAGE/page/${page - 1}/", headers)
+        val kind = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT)!!
+        return when (kind) {
+            "Movies" -> GET(
+                "$apiBaseUrl/latestMovies/level/0/itemsPerPage/$LATEST_ITEMS_PER_PAGE/page/${page - 1}/",
+                headers,
+            )
+            "Series" -> GET(
+                "$apiBaseUrl/latestSeries/level/0/itemsPerPage/$LATEST_ITEMS_PER_PAGE/page/${page - 1}/",
+                headers,
+            )
+            else -> {
+                // "All": نتناوب بين الأفلام والمسلسلات - الصفحات الفردية أفلام والزوجية مسلسلات
+                val apiPage = (page - 1) / 2
+                val endpoint = if (page % 2 != 0) "latestMovies" else "latestSeries"
+                GET(
+                    "$apiBaseUrl/$endpoint/level/0/itemsPerPage/$LATEST_ITEMS_PER_PAGE/page/$apiPage/",
+                    headers,
+                )
+            }
+        }
     }
 
     override fun latestUpdatesParse(response: Response): AnimesPage {
@@ -245,9 +267,10 @@ class ShabakatyCinemana :
         return AnimesPage(animeList, animeList.size == LATEST_ITEMS_PER_PAGE)
     }
 
+    // ✅ FIX: popularAnime يجلب كل شيء عند kind=0 بدون تصفية
     override fun popularAnimeRequest(page: Int): Request {
-        val kindPref = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT) ?: PREF_LATEST_KIND_DEFAULT
-        val kind = KINDS_LIST.firstOrNull { it.first == kindPref }?.second ?: 0
+        val kindPref = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT)!!
+        val kind = KINDS_LIST.first { it.first == kindPref }.second
         val url = if (kind == 0) {
             "$apiBaseUrl/video/V/2/itemsPerPage/$POPULAR_ITEMS_PER_PAGE/level/0/sortParam/desc/pageNumber/${page - 1}"
         } else {
@@ -267,35 +290,40 @@ class ShabakatyCinemana :
         filters: AnimeFilterList,
     ): AnimesPage {
         val filterList = if (filters.isEmpty()) getFilterList() else filters
-        val isBrowsingFilter = filterList.find { it.name == IS_BROWSING_FILTER_NAME } as? CheckBoxFilter
-        val kindFilter = filterList.find { it.name == KIND_FILTER_NAME } as? SingleSelectFilter
-        val mainCategoryFilter = filterList.find { it.name == MAIN_CATEGORY_FILTER_NAME } as? MultipleSelectFilter
-        val subCategoryFilter = filterList.find { it.name == SUB_CATEGORY_FILTER_NAME } as? MultipleSelectFilter
-        val languageFilter = filterList.find { it.name == LANGUAGE_FILTER_NAME } as? SingleSelectFilter
-        val yearFilter = filterList.find { it.name == YEAR_FILTER_NAME } as? YearFilter
-        val staffTitleFilter = filterList.find { it.name == STAFF_TITLE_FILTER_NAME } as? StaffTitleFilter
-        val browseResultSortFilter = filterList.find { it.name == BROWSE_RESULT_SORT_FILTER_NAME } as? BrowseResultSort
-        
-        val trimmedQuery = query.trim()
-        
-        // إصلاح الخطأ المنطقي: لا تتصفح إذا كان المستخدم يبحث فعلياً بنص
-        val isBrowsing = (isBrowsingFilter?.state ?: false) && trimmedQuery.isBlank()
-        
-        val kindName = kindFilter?.getNameValue() ?: "all"
-        val kindNumber = kindFilter?.getNumberValue()?.toString() ?: "0"
-        val selectedMainCategories = mainCategoryFilter?.getSelectedIds() ?: emptyList()
+        val isBrowsingFilter =
+            filterList.find { it.name == IS_BROWSING_FILTER_NAME } as CheckBoxFilter
+        val kindFilter =
+            filterList.find { it.name == KIND_FILTER_NAME } as SingleSelectFilter
+        val mainCategoryFilter =
+            filterList.find { it.name == MAIN_CATEGORY_FILTER_NAME } as MultipleSelectFilter
+        val subCategoryFilter =
+            filterList.find { it.name == SUB_CATEGORY_FILTER_NAME } as MultipleSelectFilter
+        val languageFilter =
+            filterList.find { it.name == LANGUAGE_FILTER_NAME } as SingleSelectFilter
+        val yearFilter =
+            filterList.find { it.name == YEAR_FILTER_NAME } as YearFilter
+        val staffTitleFilter =
+            filterList.find { it.name == STAFF_TITLE_FILTER_NAME } as StaffTitleFilter
+        val browseResultSortFilter =
+            filterList.find { it.name == BROWSE_RESULT_SORT_FILTER_NAME } as BrowseResultSort
+
+        val isBrowsing = isBrowsingFilter.state
+        val kindName = kindFilter.getNameValue()
+        val kindNumber = kindFilter.getNumberValue().toString()
+        val selectedMainCategories = mainCategoryFilter.getSelectedIds()
         val mainCategory = selectedMainCategories.joinToString(",")
-        val selectedSubCategories = subCategoryFilter?.getSelectedIds() ?: emptyList()
+        val selectedSubCategories = subCategoryFilter.getSelectedIds()
         val bothCategory = (selectedMainCategories + selectedSubCategories).joinToString(",")
-        val language = languageFilter?.getNumberValue()?.toString() ?: "0"
-        val year = yearFilter?.getFormatted() ?: ""
-        val staffTitle = staffTitleFilter?.state ?: ""
-        val browseResultSort = browseResultSortFilter?.getValue() ?: "desc"
+        val language = languageFilter.getNumberValue().toString()
+        val year = yearFilter.getFormatted()
+        val staffTitle = staffTitleFilter.state
+        val browseResultSort = browseResultSortFilter.getValue()
+        val trimmedQuery = query.trim()
 
         var url = apiBaseUrl.toHttpUrl()
-        
+
         if (isBrowsing) {
-            if ((languageFilter?.state ?: 0) != 0 && mainCategory.isNotBlank()) {
+            if (languageFilter.state != 0 && mainCategory.isNotBlank()) {
                 url = url.newBuilder()
                     .addPathSegment("videosByCategoryAndLanguage")
                     .addQueryParameter("language_id", language)
@@ -305,9 +333,10 @@ class ShabakatyCinemana :
                 url = url.newBuilder()
                     .addPathSegment("videosByCategory")
                     .build()
-
-                if (mainCategoryFilter?.hasSelected() == true) {
-                    url = url.newBuilder().addQueryParameter("categoryID", mainCategory).build()
+                if (mainCategoryFilter.hasSelected()) {
+                    url = url.newBuilder()
+                        .addQueryParameter("categoryID", mainCategory)
+                        .build()
                 }
             }
 
@@ -318,7 +347,9 @@ class ShabakatyCinemana :
                 .build()
 
             if (kindNumber != "0") {
-                url = url.newBuilder().addQueryParameter("videoKind", kindNumber).build()
+                url = url.newBuilder()
+                    .addQueryParameter("videoKind", kindNumber)
+                    .build()
             }
 
             val resp = client.newCall(GET(url, headers)).execute()
@@ -327,47 +358,54 @@ class ShabakatyCinemana :
             } catch (e: Exception) {
                 return AnimesPage(emptyList(), false)
             }
-            return AnimesPage(animeListWithInfo.animes, animeListWithInfo.animes.size == POPULAR_ITEMS_PER_PAGE)
+            return AnimesPage(
+                animeListWithInfo.animes,
+                animeListWithInfo.animes.size == POPULAR_ITEMS_PER_PAGE,
+            )
         } else {
-            val urlBuilder = url.newBuilder()
-                .addQueryParameter("level", "0")
+            url = url.newBuilder()
                 .addPathSegment("AdvancedSearch")
+                .addQueryParameter("level", "0")
                 .addQueryParameter("page", "${page - 1}")
+                .addQueryParameter("year", year)
+                .build()
 
-            // إضافة فلتر السنة فقط إذا تم تعديله من قبل المستخدم بشكل صريح
-            val defaultYearRange = "1900,${Calendar.getInstance().get(Calendar.YEAR)}"
-            if (year.isNotBlank() && year != defaultYearRange) {
-                urlBuilder.addQueryParameter("year", year)
-            }
-
-            if (trimmedQuery.isNotBlank()) {
-                // البحث العادي بنص: إجبار البحث ليطال الأفلام والمسلسلات دائماً
-                urlBuilder.addQueryParameter("videoTitle", trimmedQuery)
-                urlBuilder.addQueryParameter("type", "all") 
-            } else {
-                // البحث المتقدم (بدون نص): نعتمد على الفلتر المختار
-                if (kindName != "all") {
-                    urlBuilder.addQueryParameter("type", kindName)
-                }
+            // ✅ FIX: عدم إضافة type عند "all" حتى يبحث في الأفلام والمسلسلات معاً
+            if (kindName != "all") {
+                url = url.newBuilder()
+                    .addQueryParameter("type", kindName)
+                    .build()
             }
 
             if (bothCategory.isNotBlank()) {
-                urlBuilder.addQueryParameter("category_id", bothCategory)
+                url = url.newBuilder()
+                    .addQueryParameter("category_id", bothCategory)
+                    .build()
+            }
+
+            if (trimmedQuery.isNotBlank()) {
+                url = url.newBuilder()
+                    .addQueryParameter("videoTitle", trimmedQuery)
+                    .build()
             }
 
             if (staffTitle.isNotBlank()) {
-                urlBuilder.addQueryParameter("staffTitle", staffTitle)
+                url = url.newBuilder()
+                    .addQueryParameter("staffTitle", staffTitle)
+                    .build()
             }
 
-            val resp = client.newCall(GET(urlBuilder.build(), headers)).execute()
+            val resp = client.newCall(GET(url, headers)).execute()
             val animeList = resp.asModelList(SAnimeDeserializer)
             return AnimesPage(animeList, animeList.size == SEARCH_ITEMS_PER_PAGE)
         }
     }
 
-    override fun searchAnimeParse(response: Response) = throw UnsupportedOperationException("Not used.")
+    override fun searchAnimeParse(response: Response) =
+        throw UnsupportedOperationException("Not used.")
 
-    override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList) = throw UnsupportedOperationException("Not used.")
+    override fun searchAnimeRequest(page: Int, query: String, filters: AnimeFilterList) =
+        throw UnsupportedOperationException("Not used.")
 
     override suspend fun getEpisodeList(anime: SAnime): List<SEpisode> {
         val episodeList = try {
@@ -379,8 +417,8 @@ class ShabakatyCinemana :
         return if (episodeList.isNotEmpty()) {
             episodeList.sortedWith(
                 compareBy(
-                    { it.name.split(SEASON_EPISODE_DELIMITER).firstOrNull()?.toIntOrNull() ?: 0 },
-                    { it.name.split(SEASON_EPISODE_DELIMITER).lastOrNull()?.toIntOrNull() ?: 0 },
+                    { it.name.split(SEASON_EPISODE_DELIMITER).first().parseAs<Int>() },
+                    { it.name.split(SEASON_EPISODE_DELIMITER).last().parseAs<Int>() },
                 ),
             ).reversed()
         } else {
@@ -394,7 +432,8 @@ class ShabakatyCinemana :
         }
     }
 
-    override fun episodeListRequest(anime: SAnime): Request = GET("$apiBaseUrl/videoSeason/id/${anime.url}")
+    override fun episodeListRequest(anime: SAnime): Request =
+        GET("$apiBaseUrl/videoSeason/id/${anime.url}")
 
     override fun episodeListParse(response: Response): List<SEpisode> = try {
         response.asModelList(SEpisodeDeserializer)
@@ -403,63 +442,94 @@ class ShabakatyCinemana :
     }
 
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
-        val extension = preferences.getString(PREF_SUBTITLE_EXT_KEY, PREF_SUBTITLE_EXT_DEFAULT) ?: PREF_SUBTITLE_EXT_DEFAULT
-        val language = preferences.getString(PREF_SUBTITLE_LANG_KEY, PREF_SUBTITLE_LANG_DEFAULT) ?: PREF_SUBTITLE_LANG_DEFAULT
+        val preferredExtension =
+            preferences.getString(PREF_SUBTITLE_EXT_KEY, PREF_SUBTITLE_EXT_DEFAULT)!!
+        val preferredLanguage =
+            preferences.getString(PREF_SUBTITLE_LANG_KEY, PREF_SUBTITLE_LANG_DEFAULT)!!
+
         val subs = try {
-            this.client.newCall(GET("$apiBaseUrl/translationFiles/id/${episode.url}")).execute()
-                .asModel(SubtitleDeserialize)
+            client.newCall(
+                GET("$apiBaseUrl/translationFiles/id/${episode.url}"),
+            ).execute()
+                .asModel(SubtitleDeserializer)
+                // ✅ FIX: ترتيب صحيح - الأفضل تطابقاً يأتي أولاً
                 .sortedWith(
-                    compareBy(
-                        { it.lang.split(SUBTITLE_DELIMITER).contains(extension) },
-                        { it.lang.split(SUBTITLE_DELIMITER).contains(language) },
-                    ),
-                ).reversed()
+                    compareByDescending<Track> {
+                        it.lang.split(SUBTITLE_DELIMITER).contains(preferredLanguage)
+                    }.thenByDescending {
+                        it.lang.split(SUBTITLE_DELIMITER).contains(preferredExtension)
+                    },
+                )
         } catch (e: Exception) {
             emptyList()
         }
 
         return super.getVideoList(episode).map {
-            Video(url = it.url, quality = it.quality, videoUrl = it.videoUrl, subtitleTracks = subs)
+            Video(
+                url = it.url,
+                quality = it.quality,
+                videoUrl = it.videoUrl,
+                subtitleTracks = subs,
+            )
         }
     }
 
-    override fun videoListRequest(episode: SEpisode) = GET("$apiBaseUrl/transcoddedFiles/id/${episode.url}")
+    override fun videoListRequest(episode: SEpisode) =
+        GET("$apiBaseUrl/transcoddedFiles/id/${episode.url}")
 
-    override fun videoListParse(response: Response) = response.asModelList(VideoDeserializer)
+    override fun videoListParse(response: Response) =
+        response.asModelList(VideoDeserializer)
 
     override fun List<Video>.sort(): List<Video> {
-        val qualityPref = preferences.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT) ?: PREF_QUALITY_DEFAULT
+        val quality = preferences.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT)!!
         return this.sortedWith(
-            compareBy(
-                { it.quality.contains(qualityPref) },
-                { Regex("""(\d+)""").find(it.quality)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
-            ),
-        ).reversed()
+            compareByDescending<Video> { it.quality.contains(quality) }
+                .thenByDescending {
+                    Regex("""(\d+)p?""").find(it.quality)
+                        ?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                },
+        )
     }
 
-    private open class SingleSelectFilter(displayName: String, val vals: Array<Pair<String, Int>>, default: Int = 0) : AnimeFilter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), default) {
+    // ── Filters ──────────────────────────────────────────────────────────────
+
+    private open class SingleSelectFilter(
+        displayName: String,
+        val vals: Array<Pair<String, Int>>,
+        default: Int = 0,
+    ) : AnimeFilter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), default) {
         fun getNameValue() = vals[state].first.lowercase()
         fun getNumberValue() = vals[state].second
     }
 
-    private open class MultipleSelectFilter(displayName: String, vals: Array<Pair<String, Int>>) : AnimeFilter.Group<CheckBoxFilter>(displayName, vals.map { CheckBoxFilter(it.first, false, it.second) }) {
-        fun getSelectedIds(): List<Int> = this.state.filter { it.state }.map { it.value }
-        fun hasSelected(): Boolean = this.state.any { it.state }
+    private open class MultipleSelectFilter(
+        displayName: String,
+        vals: Array<Pair<String, Int>>,
+    ) : AnimeFilter.Group<CheckBoxFilter>(
+        displayName,
+        vals.map { CheckBoxFilter(it.first, false, it.second) },
+    ) {
+        fun getSelectedIds(): List<Int> = state.filter { it.state }.map { it.value }
+        fun hasSelected(): Boolean = state.any { it.state }
     }
 
-    private open class CheckBoxFilter(displayName: String, default: Boolean, val value: Int = 0) : AnimeFilter.CheckBox(displayName, default)
+    private open class CheckBoxFilter(
+        displayName: String,
+        default: Boolean,
+        val value: Int = 0,
+    ) : AnimeFilter.CheckBox(displayName, default)
 
-    private open class YearFilter(displayName: String, years: Pair<YearTextFilter, YearTextFilter>) :
-        AnimeFilter.Group<YearTextFilter>(
-            displayName,
-            years.toList(),
-        ) {
-        fun getFormatted(): String = this.state.joinToString(",") {
+    private open class YearFilter(
+        displayName: String,
+        years: Pair<YearTextFilter, YearTextFilter>,
+    ) : AnimeFilter.Group<YearTextFilter>(displayName, years.toList()) {
+        fun getFormatted(): String = state.map {
             it.state.ifBlank { it.default }
-        }
+        }.joinToString(",")
     }
 
-    private open class YearTextFilter(displayName: String, val default: String) : AnimeFilter.Text(displayName, default)
+    private open class YearTextFilter(displayName: String, val default: String) :
+        AnimeFilter.Text(displayName, default)
 
     private open class BrowseResultSort(
         displayName: String,
@@ -469,11 +539,7 @@ class ShabakatyCinemana :
         fun getValue(): String {
             val currentState = state ?: default
             val sortKind = vals[currentState.index].second
-            return if (currentState.ascending) {
-                sortKind.first
-            } else {
-                sortKind.second
-            }
+            return if (currentState.ascending) sortKind.first else sortKind.second
         }
     }
 
@@ -482,10 +548,7 @@ class ShabakatyCinemana :
     override fun getFilterList() = AnimeFilterList(
         StaffTitleFilter(STAFF_TITLE_FILTER_NAME),
         CheckBoxFilter(IS_BROWSING_FILTER_NAME, false),
-        SingleSelectFilter(
-            KIND_FILTER_NAME,
-            KINDS_LIST,
-        ),
+        SingleSelectFilter(KIND_FILTER_NAME, KINDS_LIST),
         MultipleSelectFilter(
             MAIN_CATEGORY_FILTER_NAME,
             arrayOf(
@@ -544,13 +607,14 @@ class ShabakatyCinemana :
                 Pair("Arabic", 9),
                 Pair("Hindi", 10),
                 Pair("French", 11),
-                Pair("German", SEARCH_ITEMS_PER_PAGE),
+                // ✅ FIX: إصلاح IDs الخاطئة لـ German وRussian
+                Pair("German", LANG_ID_GERMAN),
                 Pair("Italian", 13),
                 Pair("Spanish", 14),
                 Pair("Chinese", 21),
                 Pair("Japanese", 22),
                 Pair("Korean", 23),
-                Pair("Russian", LATEST_ITEMS_PER_PAGE),
+                Pair("Russian", LANG_ID_RUSSIAN),
                 Pair("Turkish", 25),
                 Pair("Norwegian", 26),
                 Pair("Persian", 27),
@@ -569,7 +633,7 @@ class ShabakatyCinemana :
                 Pair("Hungarian", 76),
                 Pair("Thai", 80),
                 Pair("Croatian", 84),
-                Pair(" Malay", 85),
+                Pair("Malay", 85),
                 Pair("Finnish", 86),
                 Pair("Vietnamese", 88),
                 Pair("Zulu", 89),
@@ -583,7 +647,7 @@ class ShabakatyCinemana :
                 Pair("Icelandic", 56),
                 Pair("Georgian", 58),
                 Pair("Pakistani", 61),
-                Pair("Czeck", 72),
+                Pair("Czech", 72),
                 Pair("Latvian", 87),
                 Pair("Kazakh", 90),
                 Pair("Estonian", 91),
@@ -601,7 +665,10 @@ class ShabakatyCinemana :
         YearFilter(
             YEAR_FILTER_NAME,
             YearTextFilter("start", "1900") to
-                YearTextFilter("end", Calendar.getInstance().get(Calendar.YEAR).toString()),
+                YearTextFilter(
+                    "end",
+                    Calendar.getInstance().get(Calendar.YEAR).toString(),
+                ),
         ),
         BrowseResultSort(
             BROWSE_RESULT_SORT_FILTER_NAME,
@@ -615,20 +682,18 @@ class ShabakatyCinemana :
         ),
     )
 
+    // ── Preferences ──────────────────────────────────────────────────────────
+
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         ListPreference(screen.context).apply {
             key = PREF_LATEST_KIND_KEY
-            title = "Preferred Latest kind"
+            title = "Preferred content kind (Latest & Popular)"
             entries = KINDS_LIST.map { it.first }.toTypedArray()
             entryValues = KINDS_LIST.map { it.first }.toTypedArray()
             setDefaultValue(PREF_LATEST_KIND_DEFAULT)
             summary = "%s"
-
             setOnPreferenceChangeListener { _, newValue ->
-                val selected = newValue as String
-                val index = findIndexOfValue(selected)
-                val entry = entryValues[index] as String
-                preferences.edit().putString(key, entry).commit()
+                preferences.edit().putString(key, newValue as String).commit()
             }
         }.also(screen::addPreference)
 
@@ -639,12 +704,8 @@ class ShabakatyCinemana :
             entryValues = QUALITY_LIST
             setDefaultValue(PREF_QUALITY_DEFAULT)
             summary = "%s"
-
             setOnPreferenceChangeListener { _, newValue ->
-                val selected = newValue as String
-                val index = findIndexOfValue(selected)
-                val entry = entryValues[index] as String
-                preferences.edit().putString(key, entry).commit()
+                preferences.edit().putString(key, newValue as String).commit()
             }
         }.also(screen::addPreference)
 
@@ -655,12 +716,8 @@ class ShabakatyCinemana :
             entryValues = LANG_LIST
             setDefaultValue(PREF_SUBTITLE_LANG_DEFAULT)
             summary = "%s"
-
             setOnPreferenceChangeListener { _, newValue ->
-                val selected = newValue as String
-                val index = findIndexOfValue(selected)
-                val entry = entryValues[index] as String
-                preferences.edit().putString(key, entry).commit()
+                preferences.edit().putString(key, newValue as String).commit()
             }
         }.also(screen::addPreference)
 
@@ -671,12 +728,8 @@ class ShabakatyCinemana :
             entryValues = EXT_LIST
             setDefaultValue(PREF_SUBTITLE_EXT_DEFAULT)
             summary = "%s"
-
             setOnPreferenceChangeListener { _, newValue ->
-                val selected = newValue as String
-                val index = findIndexOfValue(selected)
-                val entry = entryValues[index] as String
-                preferences.edit().putString(key, entry).commit()
+                preferences.edit().putString(key, newValue as String).commit()
             }
         }.also(screen::addPreference)
     }
