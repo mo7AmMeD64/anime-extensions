@@ -511,8 +511,7 @@ class ShabakatyCinemana :
         }.joinToString(",")
     }
 
-    private open class YearTextFilter(displayName: String, val default: String) :
-        AnimeFilter.Text(displayName, default)
+    private open class YearTextFilter(displayName: String, val default: String) : AnimeFilter.Text(displayName, default)
 
     private open class BrowseResultSort(
         displayName: String,
