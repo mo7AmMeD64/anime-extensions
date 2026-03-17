@@ -54,17 +54,21 @@ object SEpisodeDeserializer : DeserializationStrategy<SEpisode> {
         val jsonDecoder = decoder as JsonDecoder
         val jsonObject = jsonDecoder.decodeJsonElement() as JsonObject
 
-        val nb = jsonObject["nb"]?.jsonPrimitive?.content!!
+        val nb = jsonObject["nb"]?.jsonPrimitive?.content ?: ""
         val episodeNumber = jsonObject["episodeNummer"]?.jsonPrimitive?.content
         val seasonNumber = jsonObject["season"]?.jsonPrimitive?.content
         val seasonEpisode = arrayOf(seasonNumber, episodeNumber).joinToString(ShabakatyCinemana.SEASON_EPISODE_DELIMITER)
         val uploadDate = jsonObject["videoUploadDate"]?.jsonPrimitive?.content.runCatching {
-            this?.let { ShabakatyCinemana.DATE_FORMATTER.parse(it)?.time }
+            this?.let {
+                synchronized(ShabakatyCinemana.DATE_FORMATTER) {
+                    ShabakatyCinemana.DATE_FORMATTER.parse(it)?.time
+                }
+            }
         }.getOrNull() ?: 0L
 
         return SEpisode.create().apply {
             url = nb
-            episode_number = "$seasonNumber.$episodeNumber".parseAs()
+            episode_number = "$seasonNumber.$episodeNumber".toFloatOrNull() ?: 0f
             name = seasonEpisode
             date_upload = uploadDate
         }
@@ -79,7 +83,7 @@ object VideoDeserializer : DeserializationStrategy<Video> {
         val jsonDecoder = decoder as JsonDecoder
         val jsonObject = jsonDecoder.decodeJsonElement() as JsonObject
 
-        val videoUrl = jsonObject["videoUrl"]?.jsonPrimitive?.content!!
+        val videoUrl = jsonObject["videoUrl"]?.jsonPrimitive?.content ?: ""
         val quality = jsonObject["resolution"]?.jsonPrimitive?.content.orEmpty()
 
         return Video(url = videoUrl, videoUrl = videoUrl, quality = quality)
@@ -94,11 +98,11 @@ object SubtitleDeserialize : DeserializationStrategy<List<Track>> {
         val jsonDecoder = decoder as JsonDecoder
         val jsonObject = jsonDecoder.decodeJsonElement() as JsonObject
 
-        return jsonObject["translations"]?.jsonArray?.map {
-            val url = it.jsonObject["file"]?.jsonPrimitive?.content!!
-            val name = it.jsonObject["name"]?.jsonPrimitive?.content
-            val extension = it.jsonObject["extention"]?.jsonPrimitive?.content
-            val lang = arrayOf(name, extension).joinToString(ShabakatyCinemana.SUBTITLE_DELIMITER)
+        return jsonObject["translations"]?.jsonArray?.mapNotNull {
+            val url = it.jsonObject["file"]?.jsonPrimitive?.content ?: return@mapNotNull null
+            val name = it.jsonObject["name"]?.jsonPrimitive?.content ?: ""
+            val extension = it.jsonObject["extention"]?.jsonPrimitive?.content ?: ""
+            val lang = arrayOf(name, extension).filter { it.isNotBlank() }.joinToString(ShabakatyCinemana.SUBTITLE_DELIMITER)
 
             Track(url, lang)
         }.orEmpty()
@@ -132,14 +136,14 @@ object SAnimeDeserializer : DeserializationStrategy<SAnime> {
         val jsonDecoder = decoder as JsonDecoder
         val jsonObject = jsonDecoder.decodeJsonElement() as JsonObject
 
-        val nb = jsonObject["nb"]?.jsonPrimitive?.content!!
+        val nb = jsonObject["nb"]?.jsonPrimitive?.content ?: ""
         val enTitle = jsonObject["en_title"]?.jsonPrimitive?.content ?: "no title"
         val imgObjUrl = jsonObject["imgObjUrl"]?.jsonPrimitive?.content
         val categories = jsonObject["categories"]?.jsonArray?.mapNotNull {
             it.jsonObject["en_title"]?.jsonPrimitive?.content
         }.orEmpty()
         val language = jsonObject["videoLanguages"]?.jsonObject?.get("en_title")?.jsonPrimitive?.content
-        val genreText = (categories + language).mapNotNull { it }.joinToString()
+        val genreText = (categories + listOfNotNull(language)).joinToString()
         val directors = jsonObject["directorsInfo"]?.jsonArray?.mapNotNull {
             it.jsonObject["name"]?.jsonPrimitive?.content
         }?.joinToString()
@@ -148,10 +152,10 @@ object SAnimeDeserializer : DeserializationStrategy<SAnime> {
         }?.joinToString()
         val enContent = jsonObject["en_content"]?.jsonPrimitive?.content
         val year = jsonObject["year"]?.jsonPrimitive?.content ?: "N/A"
-        val stars = jsonObject["stars"]?.jsonPrimitive?.content?.parseAs<Float>()?.toInt() ?: 0
+        val stars = jsonObject["stars"]?.jsonPrimitive?.content?.toFloatOrNull()?.toInt() ?: 0
         val starsText = "${"★".repeat(stars / 2)}${"☆".repeat(5 - (stars / 2))}"
-        val likes = jsonObject["Likes"]?.jsonPrimitive?.content?.parseAs<Int>() ?: 0
-        val dislikes = jsonObject["DisLikes"]?.jsonPrimitive?.content?.parseAs<Int>() ?: 0
+        val likes = jsonObject["Likes"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+        val dislikes = jsonObject["DisLikes"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
 
         return SAnime.create().apply {
             url = nb
@@ -221,9 +225,7 @@ class ShabakatyCinemana :
         const val SUBTITLE_DELIMITER = " - "
         const val SEASON_EPISODE_DELIMITER = " - "
 
-        val DATE_FORMATTER by lazy {
-            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ENGLISH)
-        }
+        val DATE_FORMATTER = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ENGLISH)
     }
 
     override fun getAnimeUrl(anime: SAnime) = "$baseUrl/video/en/${anime.url}"
@@ -233,7 +235,7 @@ class ShabakatyCinemana :
     override fun animeDetailsParse(response: Response) = response.asModel(SAnimeDeserializer)
 
     override fun latestUpdatesRequest(page: Int): Request {
-        val kind = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT)!!
+        val kind = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT) ?: PREF_LATEST_KIND_DEFAULT
         val kindEndpoint = if (kind == "All") "Movies" else kind
         return GET("$apiBaseUrl/latest$kindEndpoint/level/0/itemsPerPage/$LATEST_ITEMS_PER_PAGE/page/${page - 1}/", headers)
     }
@@ -244,8 +246,8 @@ class ShabakatyCinemana :
     }
 
     override fun popularAnimeRequest(page: Int): Request {
-        val kindPref = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT)!!
-        val kind = KINDS_LIST.first { it.first == kindPref }.second
+        val kindPref = preferences.getString(PREF_LATEST_KIND_KEY, PREF_LATEST_KIND_DEFAULT) ?: PREF_LATEST_KIND_DEFAULT
+        val kind = KINDS_LIST.firstOrNull { it.first == kindPref }?.second ?: 0
         val url = if (kind == 0) {
             "$apiBaseUrl/video/V/2/itemsPerPage/$POPULAR_ITEMS_PER_PAGE/level/0/sortParam/desc/pageNumber/${page - 1}"
         } else {
@@ -265,30 +267,35 @@ class ShabakatyCinemana :
         filters: AnimeFilterList,
     ): AnimesPage {
         val filterList = if (filters.isEmpty()) getFilterList() else filters
-        val isBrowsingFilter = filterList.find { it.name == IS_BROWSING_FILTER_NAME } as CheckBoxFilter
-        val kindFilter = filterList.find { it.name == KIND_FILTER_NAME } as SingleSelectFilter
-        val mainCategoryFilter = filterList.find { it.name == MAIN_CATEGORY_FILTER_NAME } as MultipleSelectFilter
-        val subCategoryFilter = filterList.find { it.name == SUB_CATEGORY_FILTER_NAME } as MultipleSelectFilter
-        val languageFilter = filterList.find { it.name == LANGUAGE_FILTER_NAME } as SingleSelectFilter
-        val yearFilter = filterList.find { it.name == YEAR_FILTER_NAME } as YearFilter
-        val staffTitleFilter = filterList.find { it.name == STAFF_TITLE_FILTER_NAME } as StaffTitleFilter
-        val browseResultSortFilter = filterList.find { it.name == BROWSE_RESULT_SORT_FILTER_NAME } as BrowseResultSort
-        val isBrowsing = isBrowsingFilter.state
-        val kindName = kindFilter.getNameValue()
-        val kindNumber = kindFilter.getNumberValue().toString()
-        val selectedMainCategories = mainCategoryFilter.getSelectedIds()
-        val mainCategory = selectedMainCategories.joinToString(",")
-        val selectedSubCategories = subCategoryFilter.getSelectedIds()
-        val bothCategory = (selectedMainCategories + selectedSubCategories).joinToString(",")
-        val language = languageFilter.getNumberValue().toString()
-        val year = yearFilter.getFormatted()
-        val staffTitle = staffTitleFilter.state
-        val browseResultSort = browseResultSortFilter.getValue()
+        val isBrowsingFilter = filterList.find { it.name == IS_BROWSING_FILTER_NAME } as? CheckBoxFilter
+        val kindFilter = filterList.find { it.name == KIND_FILTER_NAME } as? SingleSelectFilter
+        val mainCategoryFilter = filterList.find { it.name == MAIN_CATEGORY_FILTER_NAME } as? MultipleSelectFilter
+        val subCategoryFilter = filterList.find { it.name == SUB_CATEGORY_FILTER_NAME } as? MultipleSelectFilter
+        val languageFilter = filterList.find { it.name == LANGUAGE_FILTER_NAME } as? SingleSelectFilter
+        val yearFilter = filterList.find { it.name == YEAR_FILTER_NAME } as? YearFilter
+        val staffTitleFilter = filterList.find { it.name == STAFF_TITLE_FILTER_NAME } as? StaffTitleFilter
+        val browseResultSortFilter = filterList.find { it.name == BROWSE_RESULT_SORT_FILTER_NAME } as? BrowseResultSort
+        
         val trimmedQuery = query.trim()
+        
+        // إصلاح الخطأ المنطقي: لا تتصفح إذا كان المستخدم يبحث فعلياً بنص
+        val isBrowsing = (isBrowsingFilter?.state ?: false) && trimmedQuery.isBlank()
+        
+        val kindName = kindFilter?.getNameValue() ?: "all"
+        val kindNumber = kindFilter?.getNumberValue()?.toString() ?: "0"
+        val selectedMainCategories = mainCategoryFilter?.getSelectedIds() ?: emptyList()
+        val mainCategory = selectedMainCategories.joinToString(",")
+        val selectedSubCategories = subCategoryFilter?.getSelectedIds() ?: emptyList()
+        val bothCategory = (selectedMainCategories + selectedSubCategories).joinToString(",")
+        val language = languageFilter?.getNumberValue()?.toString() ?: "0"
+        val year = yearFilter?.getFormatted() ?: ""
+        val staffTitle = staffTitleFilter?.state ?: ""
+        val browseResultSort = browseResultSortFilter?.getValue() ?: "desc"
 
         var url = apiBaseUrl.toHttpUrl()
+        
         if (isBrowsing) {
-            if (languageFilter.state != 0 && mainCategory.isNotBlank()) {
+            if ((languageFilter?.state ?: 0) != 0 && mainCategory.isNotBlank()) {
                 url = url.newBuilder()
                     .addPathSegment("videosByCategoryAndLanguage")
                     .addQueryParameter("language_id", language)
@@ -299,7 +306,7 @@ class ShabakatyCinemana :
                     .addPathSegment("videosByCategory")
                     .build()
 
-                if (mainCategoryFilter.hasSelected()) {
+                if (mainCategoryFilter?.hasSelected() == true) {
                     url = url.newBuilder().addQueryParameter("categoryID", mainCategory).build()
                 }
             }
@@ -322,34 +329,37 @@ class ShabakatyCinemana :
             }
             return AnimesPage(animeListWithInfo.animes, animeListWithInfo.animes.size == POPULAR_ITEMS_PER_PAGE)
         } else {
-            url = url.newBuilder()
+            val urlBuilder = url.newBuilder()
                 .addQueryParameter("level", "0")
                 .addPathSegment("AdvancedSearch")
                 .addQueryParameter("page", "${page - 1}")
-                .addQueryParameter("year", year)
-                .build()
 
-            if (kindName != "all") {
-                url = url.newBuilder().addQueryParameter("type", kindName).build()
-            }
-
-            if (bothCategory.isNotBlank()) {
-                url = url.newBuilder().addQueryParameter("category_id", bothCategory).build()
+            // إضافة فلتر السنة فقط إذا تم تعديله من قبل المستخدم بشكل صريح
+            val defaultYearRange = "1900,${Calendar.getInstance().get(Calendar.YEAR)}"
+            if (year.isNotBlank() && year != defaultYearRange) {
+                urlBuilder.addQueryParameter("year", year)
             }
 
             if (trimmedQuery.isNotBlank()) {
-                url = url.newBuilder()
-                    .addQueryParameter("videoTitle", trimmedQuery)
-                    .build()
+                // البحث العادي بنص: إجبار البحث ليطال الأفلام والمسلسلات دائماً
+                urlBuilder.addQueryParameter("videoTitle", trimmedQuery)
+                urlBuilder.addQueryParameter("type", "all") 
+            } else {
+                // البحث المتقدم (بدون نص): نعتمد على الفلتر المختار
+                if (kindName != "all") {
+                    urlBuilder.addQueryParameter("type", kindName)
+                }
+            }
+
+            if (bothCategory.isNotBlank()) {
+                urlBuilder.addQueryParameter("category_id", bothCategory)
             }
 
             if (staffTitle.isNotBlank()) {
-                url = url.newBuilder()
-                    .addQueryParameter("staffTitle", staffTitle)
-                    .build()
+                urlBuilder.addQueryParameter("staffTitle", staffTitle)
             }
 
-            val resp = client.newCall(GET(url, headers)).execute()
+            val resp = client.newCall(GET(urlBuilder.build(), headers)).execute()
             val animeList = resp.asModelList(SAnimeDeserializer)
             return AnimesPage(animeList, animeList.size == SEARCH_ITEMS_PER_PAGE)
         }
@@ -366,15 +376,15 @@ class ShabakatyCinemana :
             emptyList()
         }
 
-        if (episodeList.isNotEmpty()) {
-            return episodeList.sortedWith(
+        return if (episodeList.isNotEmpty()) {
+            episodeList.sortedWith(
                 compareBy(
-                    { it.name.split(SEASON_EPISODE_DELIMITER).first().parseAs<Int>() },
-                    { it.name.split(SEASON_EPISODE_DELIMITER).last().parseAs<Int>() },
+                    { it.name.split(SEASON_EPISODE_DELIMITER).firstOrNull()?.toIntOrNull() ?: 0 },
+                    { it.name.split(SEASON_EPISODE_DELIMITER).lastOrNull()?.toIntOrNull() ?: 0 },
                 ),
             ).reversed()
         } else {
-            return listOf(
+            listOf(
                 SEpisode.create().apply {
                     url = anime.url
                     episode_number = 1.0F
@@ -393,8 +403,8 @@ class ShabakatyCinemana :
     }
 
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
-        val extension = preferences.getString(PREF_SUBTITLE_EXT_KEY, PREF_SUBTITLE_EXT_DEFAULT)!!
-        val language = preferences.getString(PREF_SUBTITLE_LANG_KEY, PREF_SUBTITLE_LANG_DEFAULT)!!
+        val extension = preferences.getString(PREF_SUBTITLE_EXT_KEY, PREF_SUBTITLE_EXT_DEFAULT) ?: PREF_SUBTITLE_EXT_DEFAULT
+        val language = preferences.getString(PREF_SUBTITLE_LANG_KEY, PREF_SUBTITLE_LANG_DEFAULT) ?: PREF_SUBTITLE_LANG_DEFAULT
         val subs = try {
             this.client.newCall(GET("$apiBaseUrl/translationFiles/id/${episode.url}")).execute()
                 .asModel(SubtitleDeserialize)
@@ -418,11 +428,11 @@ class ShabakatyCinemana :
     override fun videoListParse(response: Response) = response.asModelList(VideoDeserializer)
 
     override fun List<Video>.sort(): List<Video> {
-        val quality = preferences.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT)!!
+        val qualityPref = preferences.getString(PREF_QUALITY_KEY, PREF_QUALITY_DEFAULT) ?: PREF_QUALITY_DEFAULT
         return this.sortedWith(
             compareBy(
-                { it.quality.contains(quality) },
-                { Regex("""(\d+)p""").find(it.quality)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
+                { it.quality.contains(qualityPref) },
+                { Regex("""(\d+)""").find(it.quality)?.groupValues?.get(1)?.toIntOrNull() ?: 0 },
             ),
         ).reversed()
     }
@@ -444,9 +454,9 @@ class ShabakatyCinemana :
             displayName,
             years.toList(),
         ) {
-        fun getFormatted(): String = this.state.map {
+        fun getFormatted(): String = this.state.joinToString(",") {
             it.state.ifBlank { it.default }
-        }.joinToString(",")
+        }
     }
 
     private open class YearTextFilter(displayName: String, val default: String) : AnimeFilter.Text(displayName, default)
